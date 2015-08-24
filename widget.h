@@ -11,23 +11,25 @@ class Widget : public QGLWidget, public QGLFunctions
 
 public:
     Widget(QWidget *parent = 0);
+    // YUV420P
     /*!
      * \brief setYUV420pParameters
+     * call once before setFrameData() if parameters changed
      * \param w frame width
      * \param h frame height
      * \param strides strides of each plane. If null, it's equals to {w, w/2, w/2}.
      */
     void setYUV420pParameters(int w, int h, int* strides = NULL);
+    void setFrameData(const QByteArray& data);
+    // QImage
     /*!
      * \brief setQImageParameters
-     * \param fmt
-     * \param w
-     * \param h
+     * call once before setImage() if parameters changed
+     * \param fmt only RGB888 is supported
      * \param stride QImage.bytesPerLine()
      */
-    void setQImageParameters(QImage::Format fmt, int w, int h, int stride = 0);
-    void setFrameSize(int w, int h);
-    void setFrameData(const QByteArray& data, int* strides = 0);
+    void setQImageParameters(QImage::Format fmt, int w, int h, int stride);
+    void setImage(const QImage& img);
     // TODO: only init(w,h,strides) init(QImage::Format, w, h, strides)
 protected:
     void bind();
@@ -41,21 +43,23 @@ private:
     bool update_res;
     int width;
     int height;
-    int stride[3];
-    char *pitch[3];
+    //char *pitch[3];
     QByteArray m_data;
+    QImage m_image;
 
     typedef struct {
-        int stride;
         char* data;
-        GLuint tex;
-        int location;
+        int stride;
+        GLint internal_fmt;
+        GLenum fmt;
+        GLenum type;
+        int bpp;
         QSize tex_size;
         QSize upload_size;
     } Plane;
     QVector<Plane> plane;
 
-    QSize tex_size[3], tex_upload_size[3];
+    //QSize tex_size[3], tex_upload_size[3];
     GLuint tex[3];
     int u_MVP_matrix, u_colorMatrix, u_Texture[3];
     QGLShaderProgram *m_program;

@@ -10,6 +10,19 @@ char const *const* attributeNames()
     return names;
 }
 
+static const QMatrix4x4 yuv2rgb_bt601 =
+           QMatrix4x4(
+                1.0f,  0.000f,  1.402f, 0.0f,
+                1.0f, -0.344f, -0.714f, 0.0f,
+                1.0f,  1.772f,  0.000f, 0.0f,
+                0.0f,  0.000f,  0.000f, 1.0f)
+            *
+            QMatrix4x4(
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f, 0.0f, -0.5f,
+                0.0f, 0.0f, 1.0f, -0.5f,
+                0.0f, 0.0f, 0.0f, 1.0f);
+
 Widget::Widget(QWidget *parent)
     : QGLWidget(parent)
     , update_res(true)
@@ -31,22 +44,25 @@ Widget::Widget(QWidget *parent)
     memset(tex, 0, 3);
 }
 
-void Widget::setFrameData(const QByteArray &data, int *strides)
+void Widget::setFrameData(const QByteArray &data)
 {
-    //QMutexLocker lock(&m_mutex);
+    QMutexLocker lock(&m_mutex);
+    Q_UNUSED(lock);
     m_data = data;
-    pitch[0] = (char*)m_data.constData();
-    if (strides) {
-        pitch[1] = pitch[0] + strides[0]*height;
-        pitch[2] = pitch[1] + strides[1]*height/2;
-    } else {
-        pitch[1] = pitch[0] + width*height;
-        pitch[2] = pitch[1] + width/2*height/2;
+    plane[0].data = (char*)m_data.constData();
+    if (plane.size() > 1) {
+        qDebug("set plane 1 2");
+        plane[1].data = plane[0].data + plane[0].stride*height;
+        plane[2].data = plane[1].data + plane[1].stride*height/2;
     }
-    qDebug() << QByteArray(pitch[0], 20);
-    qDebug() << QByteArray(pitch[1], 20);
-    qDebug() << QByteArray(pitch[2], 20);
-    qDebug() << "data set";
+}
+
+void Widget::setImage(const QImage &img)
+{
+    QMutexLocker lock(&m_mutex);
+    Q_UNUSED(lock);
+    m_image = img;
+    plane[0].data = (char*)m_image.constBits();
 }
 
 void Widget::bind()
@@ -60,30 +76,21 @@ void Widget::bindPlane(int p)
 {
     glActiveTexture(GL_TEXTURE0 + p);
     glBindTexture(GL_TEXTURE_2D, tex[p]);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     // This is necessary for non-power-of-two textures
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    qDebug("bind plane %d, %p", p, pitch[p]);
-    qDebug() << QByteArray(pitch[p], 20);
-    //qDebug() << tex_upload_size[p];
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex_upload_size[p].width(), tex_upload_size[p].height(), GL_LUMINANCE, GL_UNSIGNED_BYTE, pitch[p]);
+    const Plane &P = plane[p];
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, P.upload_size.width(), P.upload_size.height(), P.fmt, P.type, P.data);
 }
 
 void Widget::initTextures()
 {
-    for (int i = 0; i < 3; ++i) {
-        tex_size[i].setWidth(tex_size[i].width());
-        tex_upload_size[i].setWidth(tex_upload_size[i].width());
-    }
-
     glDeleteTextures(3, tex);
     memset(tex, 0, 3);
-    glGenTextures(3, tex);
+    glGenTextures(plane.size(), tex);
     qDebug("init textures...");
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < plane.size(); ++i) {
+        const Plane &P = plane[i];
         qDebug("tex[%d]: %u", i, tex[i]);
         glBindTexture(GL_TEXTURE_2D, tex[i]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -91,73 +98,101 @@ void Widget::initTextures()
         // This is necessary for non-power-of-two textures
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, tex_size[i].width(), tex_size[i].height(), 0/*border, ES not support*/, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, P.internal_fmt, P.tex_size.width(), P.tex_size.height(), 0/*border, ES not support*/, P.fmt, P.type, NULL);
         glBindTexture(GL_TEXTURE_2D, 0);
-    }
-}
-
-void Widget::setFrameSize(int w, int h)
-{
-    width = w;
-    height = h;
-    tex_size[0].setWidth(w); //use stride
-    tex_upload_size[0].setWidth(w);
-    tex_size[0].setHeight(h);
-    tex_upload_size[0].setHeight(h);
-    for (int i = 1; i < 3; ++i) {
-        tex_size[i].setWidth(w/2);
-        tex_upload_size[i].setWidth(w/2);
-        tex_size[i].setHeight(h/2);
-        tex_upload_size[i].setHeight(h/2);
     }
 }
 
 void Widget::setYUV420pParameters(int w, int h, int *strides)
 {
+    QMutexLocker lock(&m_mutex);
+    Q_UNUSED(lock);
     update_res = true;
+    m_data.clear();
+    m_image = QImage();
+    width = w;
+    height = h;
     plane.resize(3);
     Plane &p = plane[0];
-    p.stride = stride && stride[0] ? stride[0] : w;
+    p.data = 0;
+    p.stride = strides && strides[0] ? strides[0] : w;
     p.tex_size.setWidth(p.stride);
     p.upload_size.setWidth(p.stride);
     p.tex_size.setHeight(h);
     p.upload_size.setHeight(h);
-
-
-    tex_size[0].setWidth(w); //use stride
-    tex_upload_size[0].setWidth(w);
-    tex_size[0].setHeight(h);
-    tex_upload_size[0].setHeight(h);
-    for (int i = 1; i < 3; ++i) {
-        tex_size[i].setWidth(w/2);
-        tex_upload_size[i].setWidth(w/2);
-        tex_size[i].setHeight(h/2);
-        tex_upload_size[i].setHeight(h/2);
+    p.internal_fmt = p.fmt = GL_LUMINANCE;
+    p.type = GL_UNSIGNED_BYTE;
+    p.bpp = 1;
+    for (int i = 1; i < plane.size(); ++i) {
+        Plane &p = plane[i];
+        p.stride = strides && strides[i] ? strides[i] : w/2;
+        p.tex_size.setWidth(p.stride);
+        p.upload_size.setWidth(p.stride);
+        p.tex_size.setHeight(h/2);
+        p.upload_size.setHeight(h/2);
+        p.internal_fmt = p.fmt = GL_LUMINANCE;
+        p.type = GL_UNSIGNED_BYTE;
+        p.bpp = 1;
+        qDebug() << p.tex_size;
     }
 }
 
-static const QMatrix4x4 yuv2rgb_bt601 =
-           QMatrix4x4(
-                1.0f,  0.000f,  1.402f, 0.0f,
-                1.0f, -0.344f, -0.714f, 0.0f,
-                1.0f,  1.772f,  0.000f, 0.0f,
-                0.0f,  0.000f,  0.000f, 1.0f)
-            *
-            QMatrix4x4(
-                1.0f, 0.0f, 0.0f, 0.0f,
-                0.0f, 1.0f, 0.0f, -0.5f,
-                0.0f, 0.0f, 1.0f, -0.5f,
-                0.0f, 0.0f, 0.0f, 1.0f);
+void Widget::setQImageParameters(QImage::Format fmt, int w, int h, int stride)
+{
+    QMutexLocker lock(&m_mutex);
+    Q_UNUSED(lock);
+    update_res = true;
+    m_data.clear();
+    m_image = QImage();
+    width = w;
+    height = h;
+    plane.resize(1);
+    Plane &p = plane[0];
+    p.data = 0;
+    p.stride = stride ? stride : w;
+
+    typedef struct {
+        QImage::Format qfmt;
+        GLint internal_fmt;
+        GLenum fmt;
+        GLenum type;
+        int bpp;
+    } gl_fmt_entry_t ;
+    static const gl_fmt_entry_t fmts[] = {
+        { QImage::Format_RGB888, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE, 3},
+        { QImage::Format_Invalid, 0, 0, 0, 0}
+    };
+    for (int i = 0; fmts[i].bpp; ++i) {
+        if (fmts[i].qfmt == fmt) {
+            Plane &p = plane[0];
+            p.internal_fmt = fmts[i].internal_fmt;
+            p.fmt = fmts[i].fmt;
+            p.type = fmts[i].type;
+            p.internal_fmt = fmts[i].internal_fmt;
+            p.bpp = fmts[i].bpp;
+
+            p.tex_size.setWidth(p.stride/p.bpp);
+            p.upload_size.setWidth(p.stride/p.bpp);
+            p.tex_size.setHeight(h);
+            p.upload_size.setHeight(h);
+
+            return;
+        }
+    }
+    qFatal("Unsupported QImage format %d!", fmt);
+}
 
 void Widget::paintGL()
 {
-    if (update_res)
-        return;
-    if (!m_program)
+    QMutexLocker lock(&m_mutex);
+    Q_UNUSED(lock);
+    if (!plane[0].data)
         return;
     //QMutexLocker lock(&m_mutex);
-    if (!tex[0]) {
+    if (update_res || !tex[0]) {
+        initializeShader();
         initTextures();
+        update_res = false;
     }
     bind();
     m_program->bind();
@@ -198,12 +233,10 @@ void Widget::initializeGL()
 {
     qDebug("init gl");
     initializeGLFunctions();
-    initializeShader();
 }
 
 void Widget::resizeGL(int w, int h)
 {
-    qDebug("resizeGL %dx%d", w, h);
     glViewport(0, 0, w, h);
     m_mat.setToIdentity();
     //m_mat.ortho(QRectF(0, 0, w, h));
@@ -211,6 +244,11 @@ void Widget::resizeGL(int w, int h)
 
 void Widget::initializeShader()
 {
+    if (m_program) {
+        m_program->release();
+        delete m_program;
+        m_program = 0;
+    }
     m_program = new QGLShaderProgram(this);
 #define glsl(x) #x
     static const char kVertexShader[] = glsl(
@@ -238,10 +276,21 @@ void Widget::initializeShader()
                                          1)
                                      , 0.0, 1.0);
             });
+     static const char kFragmentShaderRGB[] = glsl(
+                 uniform sampler2D u_Texture0;
+                 varying vec2 v_TexCoords;
+                 void main() {
+                     vec4 c = texture2D(u_Texture0, v_TexCoords);
+                     gl_FragColor = c.rgba;
+                 });
 #undef glsl
     Q_ASSERT_X(!m_program->isLinked(), "Widget::compile()", "Compile called multiple times!");
     m_program->addShaderFromSourceCode(QGLShader::Vertex, kVertexShader);
-    m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShader);
+    if (plane.size() > 1)
+        m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShader);
+    else
+        m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShaderRGB);
+
     char const *const *attr = attributeNames();
     for (int i = 0; attr[i]; ++i) {
         qDebug("attributes: %s", attr[i]);
