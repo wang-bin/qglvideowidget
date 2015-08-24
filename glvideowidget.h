@@ -2,15 +2,14 @@
 #define WIDGET_H
 
 #include <QtOpenGL>
-#include <QtCore>
 #include <QtGui/QImage>
 
-class Widget : public QGLWidget, public QGLFunctions
+class GLVideoWidget : public QGLWidget, public QGLFunctions
 {
     Q_OBJECT
 
 public:
-    Widget(QWidget *parent = 0);
+    GLVideoWidget(QWidget *parent = 0);
     // YUV420P
     /*!
      * \brief setYUV420pParameters

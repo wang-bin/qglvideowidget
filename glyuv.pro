@@ -12,6 +12,7 @@ TEMPLATE = app
 
 
 SOURCES += main.cpp\
-        widget.cpp
+        glvideowidget.cpp
 
-HEADERS  += widget.h
+HEADERS  += \
+    glvideowidget.h

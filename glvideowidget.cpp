@@ -1,14 +1,6 @@
-#include "widget.h"
+// www.qtav.org
 
-char const *const* attributeNames()
-{
-    static const char *names[] = {
-        "a_Position",
-        "a_TexCoords",
-        0
-    };
-    return names;
-}
+#include "glvideowidget.h"
 
 static const QMatrix4x4 yuv2rgb_bt601 =
            QMatrix4x4(
@@ -23,28 +15,86 @@ static const QMatrix4x4 yuv2rgb_bt601 =
                 0.0f, 0.0f, 1.0f, -0.5f,
                 0.0f, 0.0f, 0.0f, 1.0f);
 
-Widget::Widget(QWidget *parent)
+const GLfloat kVertices[] = {
+    -1, 1,
+    1, 1,
+    1, -1,
+    -1, -1,
+};
+const GLfloat kTexCoords[] = {
+    0, 0,
+    1, 0,
+    1, 1,
+    0, 1,
+};
+
+char const *const* attributes()
+{
+    static const char a0[] = {0x61, 0x5f, 0x50, 0x6f, 0x73, 0x0};
+    static const char a1[] = {0x61, 0x5f, 0x54, 0x65, 0x78, 0x0};
+    static const char a2[] = {0x00, 0x51, 0x74, 0x41, 0x56, 0x0};
+    static const char* A[] = { a0, a1, a2, 0};
+    return A;
+}
+
+typedef struct {
+    QImage::Format qfmt;
+    GLint internal_fmt;
+    GLenum fmt;
+    GLenum type;
+    int bpp;
+} gl_fmt_entry_t;
+
+#define glsl(x) #x
+    static const char kVertexShader[] = glsl(
+        attribute vec4 a_Pos;
+        attribute vec2 a_Tex;
+        uniform mat4 u_MVP_matrix;
+        varying vec2 v_TexCoords;
+        void main() {
+          gl_Position = u_MVP_matrix * a_Pos;
+          v_TexCoords = a_Tex;
+        });
+
+    static const char kFragmentShader[] = glsl(
+            uniform sampler2D u_Texture0;
+            uniform sampler2D u_Texture1;
+            uniform sampler2D u_Texture2;
+            varying lowp vec2 v_TexCoords;
+            uniform mat4 u_colorMatrix;
+            void main()
+            {
+                 gl_FragColor = clamp(u_colorMatrix
+                                     * vec4(
+                                         texture2D(u_Texture0, v_TexCoords).r,
+                                         texture2D(u_Texture1, v_TexCoords).r,
+                                         texture2D(u_Texture2, v_TexCoords).r,
+                                         1)
+                                     , 0.0, 1.0);
+            });
+     static const char kFragmentShaderRGB[] = glsl(
+                 uniform sampler2D u_Texture0;
+                 varying vec2 v_TexCoords;
+                 void main() {
+                     vec4 c = texture2D(u_Texture0, v_TexCoords);
+                     gl_FragColor = c.rgba;
+                 });
+#undef glsl
+
+GLVideoWidget::GLVideoWidget(QWidget *parent)
     : QGLWidget(parent)
     , update_res(true)
     , m_program(0)
 {
-    setAcceptDrops(true);
-    setFocusPolicy(Qt::StrongFocus);
-    /* To rapidly update custom widgets that constantly paint over their entire areas with
-     * opaque content, e.g., video streaming widgets, it is better to set the widget's
-     * Qt::WA_OpaquePaintEvent, avoiding any unnecessary overhead associated with repainting the
-     * widget's background
-     */
-    setAttribute(Qt::WA_OpaquePaintEvent);
-    setAttribute(Qt::WA_NoSystemBackground);
+//    setAttribute(Qt::WA_OpaquePaintEvent);
+  //  setAttribute(Qt::WA_NoSystemBackground);
     //default: swap in qpainter dtor. we should swap before QPainter.endNativePainting()
     setAutoBufferSwap(false);
-    setAutoFillBackground(false);
 
     memset(tex, 0, 3);
 }
 
-void Widget::setFrameData(const QByteArray &data)
+void GLVideoWidget::setFrameData(const QByteArray &data)
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
@@ -57,7 +107,7 @@ void Widget::setFrameData(const QByteArray &data)
     }
 }
 
-void Widget::setImage(const QImage &img)
+void GLVideoWidget::setImage(const QImage &img)
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
@@ -65,14 +115,14 @@ void Widget::setImage(const QImage &img)
     plane[0].data = (char*)m_image.constBits();
 }
 
-void Widget::bind()
+void GLVideoWidget::bind()
 {
     for (int i = 0; i < 3; ++i) {
         bindPlane((i + 1) % 3);
     }
 }
 
-void Widget::bindPlane(int p)
+void GLVideoWidget::bindPlane(int p)
 {
     glActiveTexture(GL_TEXTURE0 + p);
     glBindTexture(GL_TEXTURE_2D, tex[p]);
@@ -83,7 +133,7 @@ void Widget::bindPlane(int p)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, P.upload_size.width(), P.upload_size.height(), P.fmt, P.type, P.data);
 }
 
-void Widget::initTextures()
+void GLVideoWidget::initTextures()
 {
     glDeleteTextures(3, tex);
     memset(tex, 0, 3);
@@ -103,7 +153,7 @@ void Widget::initTextures()
     }
 }
 
-void Widget::setYUV420pParameters(int w, int h, int *strides)
+void GLVideoWidget::setYUV420pParameters(int w, int h, int *strides)
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
@@ -137,7 +187,7 @@ void Widget::setYUV420pParameters(int w, int h, int *strides)
     }
 }
 
-void Widget::setQImageParameters(QImage::Format fmt, int w, int h, int stride)
+void GLVideoWidget::setQImageParameters(QImage::Format fmt, int w, int h, int stride)
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
@@ -151,13 +201,6 @@ void Widget::setQImageParameters(QImage::Format fmt, int w, int h, int stride)
     p.data = 0;
     p.stride = stride ? stride : w;
 
-    typedef struct {
-        QImage::Format qfmt;
-        GLint internal_fmt;
-        GLenum fmt;
-        GLenum type;
-        int bpp;
-    } gl_fmt_entry_t ;
     static const gl_fmt_entry_t fmts[] = {
         { QImage::Format_RGB888, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE, 3},
         { QImage::Format_Invalid, 0, 0, 0, 0}
@@ -182,13 +225,12 @@ void Widget::setQImageParameters(QImage::Format fmt, int w, int h, int stride)
     qFatal("Unsupported QImage format %d!", fmt);
 }
 
-void Widget::paintGL()
+void GLVideoWidget::paintGL()
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
     if (!plane[0].data)
         return;
-    //QMutexLocker lock(&m_mutex);
     if (update_res || !tex[0]) {
         initializeShader();
         initTextures();
@@ -202,22 +244,11 @@ void Widget::paintGL()
     m_program->setUniformValue(u_colorMatrix, yuv2rgb_bt601);
     m_program->setUniformValue(u_MVP_matrix, m_mat);
     // uniform end. attribute begin
-    const GLfloat kVertices[] = {
-        -1, 1,
-        1, 1,
-        1, -1,
-        -1, -1,
-    };
-    const GLfloat kTexCoords[] = {
-        0, 0,
-        1, 0,
-        1, 1,
-        0, 1,
-    };
+    // kVertices ...
     // normalize?
     m_program->setAttributeArray(0, GL_FLOAT, kVertices, 2);
     m_program->setAttributeArray(1, GL_FLOAT, kTexCoords, 2);
-    char const *const *attr = attributeNames();
+    char const *const *attr = attributes();
     for (int i = 0; attr[i]; ++i) {
         m_program->enableAttributeArray(i); //TODO: in setActiveShader
     }
@@ -229,20 +260,20 @@ void Widget::paintGL()
     swapBuffers();
 }
 
-void Widget::initializeGL()
+void GLVideoWidget::initializeGL()
 {
     qDebug("init gl");
     initializeGLFunctions();
 }
 
-void Widget::resizeGL(int w, int h)
+void GLVideoWidget::resizeGL(int w, int h)
 {
     glViewport(0, 0, w, h);
     m_mat.setToIdentity();
     //m_mat.ortho(QRectF(0, 0, w, h));
 }
 
-void Widget::initializeShader()
+void GLVideoWidget::initializeShader()
 {
     if (m_program) {
         m_program->release();
@@ -250,49 +281,15 @@ void Widget::initializeShader()
         m_program = 0;
     }
     m_program = new QGLShaderProgram(this);
-#define glsl(x) #x
-    static const char kVertexShader[] = glsl(
-        attribute vec4 a_Position;
-        attribute vec2 a_TexCoords;
-        uniform mat4 u_MVP_matrix;
-        varying vec2 v_TexCoords;
-        void main() {
-          gl_Position = u_MVP_matrix * a_Position;
-          v_TexCoords = a_TexCoords;
-        });
-    static const char kFragmentShader[] = glsl(
-            uniform sampler2D u_Texture0;
-            uniform sampler2D u_Texture1;
-            uniform sampler2D u_Texture2;
-            varying lowp vec2 v_TexCoords;
-            uniform mat4 u_colorMatrix;
-            void main()
-            {
-                 gl_FragColor = clamp(u_colorMatrix
-                                     * vec4(
-                                         texture2D(u_Texture0, v_TexCoords).r,
-                                         texture2D(u_Texture1, v_TexCoords).r,
-                                         texture2D(u_Texture2, v_TexCoords).r,
-                                         1)
-                                     , 0.0, 1.0);
-            });
-     static const char kFragmentShaderRGB[] = glsl(
-                 uniform sampler2D u_Texture0;
-                 varying vec2 v_TexCoords;
-                 void main() {
-                     vec4 c = texture2D(u_Texture0, v_TexCoords);
-                     gl_FragColor = c.rgba;
-                 });
-#undef glsl
-    Q_ASSERT_X(!m_program->isLinked(), "Widget::compile()", "Compile called multiple times!");
+
     m_program->addShaderFromSourceCode(QGLShader::Vertex, kVertexShader);
     if (plane.size() > 1)
         m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShader);
     else
         m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShaderRGB);
 
-    char const *const *attr = attributeNames();
-    for (int i = 0; attr[i]; ++i) {
+    char const *const *attr = attributes();
+    for (int i = 0; attr[i] && attr[i][0]; ++i) {
         qDebug("attributes: %s", attr[i]);
         m_program->bindAttributeLocation(attr[i], i);
     }
