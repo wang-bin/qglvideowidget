@@ -4,7 +4,7 @@
 #include <QtOpenGL>
 #include <QtGui/QImage>
 
-class GLVideoWidget : public QGLWidget, public QGLFunctions
+class GLVideoWidget : public QGLWidget, public QOpenGLFunctions
 {
     Q_OBJECT
 

@@ -105,6 +105,7 @@ void GLVideoWidget::setFrameData(const QByteArray &data)
         plane[1].data = plane[0].data + plane[0].stride*height;
         plane[2].data = plane[1].data + plane[1].stride*height/2;
     }
+    update();
 }
 
 void GLVideoWidget::setImage(const QImage &img)
@@ -113,6 +114,7 @@ void GLVideoWidget::setImage(const QImage &img)
     Q_UNUSED(lock);
     m_image = img;
     plane[0].data = (char*)m_image.constBits();
+    update();
 }
 
 void GLVideoWidget::bind()
@@ -263,7 +265,7 @@ void GLVideoWidget::paintGL()
 void GLVideoWidget::initializeGL()
 {
     qDebug("init gl");
-    initializeGLFunctions();
+    initializeOpenGLFunctions();
 }
 
 void GLVideoWidget::resizeGL(int w, int h)
