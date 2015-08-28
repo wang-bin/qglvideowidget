@@ -33,7 +33,7 @@ char const *const* attributes()
     static const char a0[] = {0x61, 0x5f, 0x50, 0x6f, 0x73, 0x0};
     static const char a1[] = {0x61, 0x5f, 0x54, 0x65, 0x78, 0x0};
     static const char a2[] = {0x00, 0x51, 0x74, 0x41, 0x56, 0x0};
-    static const char* A[] = { a0, a1, a2, 0};
+    static const char* A[] = { a0, a1, a2};
     return A;
 }
 
@@ -90,8 +90,6 @@ GLVideoWidget::GLVideoWidget(QWidget *parent)
 //    setAttribute(Qt::WA_OpaquePaintEvent);
   //  setAttribute(Qt::WA_NoSystemBackground);
     //default: swap in qpainter dtor. we should swap before QPainter.endNativePainting()
-    //setAutoBufferSwap(false);
-
     memset(tex, 0, 3);
 }
 
@@ -103,7 +101,6 @@ void GLVideoWidget::setFrameData(const QByteArray &data)
     m_data = data;
     plane[0].data = (char*)m_data.constData();
     if (plane.size() > 1) {
-        qDebug("set plane 1 2");
         plane[1].data = plane[0].data + plane[0].stride*height;
         plane[2].data = plane[1].data + plane[1].stride*height/2;
     }
@@ -146,10 +143,10 @@ void GLVideoWidget::initTextures()
     glDeleteTextures(3, tex);
     memset(tex, 0, 3);
     glGenTextures(plane.size(), tex);
-    qDebug("init textures...");
+    //qDebug("init textures...");
     for (int i = 0; i < plane.size(); ++i) {
         const Plane &P = plane[i];
-        qDebug("tex[%d]: %u", i, tex[i]);
+        //qDebug("tex[%d]: %u", i, tex[i]);
         glBindTexture(GL_TEXTURE_2D, tex[i]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -208,7 +205,6 @@ void GLVideoWidget::setQImageParameters(QImage::Format fmt, int w, int h, int st
     Plane &p = plane[0];
     p.data = 0;
     p.stride = stride ? stride : QImage(w, h, fmt).bytesPerLine();
-qDebug("%s@%d", __FUNCTION__, __LINE__);
     static const gl_fmt_entry_t fmts[] = {
         { QImage::Format_RGB888, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE, 3},
         { QImage::Format_Invalid, 0, 0, 0, 0}
@@ -256,21 +252,18 @@ void GLVideoWidget::paintGL()
     m_program->setAttributeArray(0, GL_FLOAT, kVertices, 2);
     m_program->setAttributeArray(1, GL_FLOAT, kTexCoords, 2);
     char const *const *attr = attributes();
-    for (int i = 0; attr[i]; ++i) {
+    for (int i = 0; attr[i][0]; ++i) {
         m_program->enableAttributeArray(i); //TODO: in setActiveShader
     }
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    // d.m_program->release(); //glUseProgram(0)
-    for (int i = 0; attr[i]; ++i) {
+    for (int i = 0; attr[i][0]; ++i) {
         m_program->disableAttributeArray(i); //TODO: in setActiveShader
     }
-    //swapBuffers();
     //update();
 }
 
 void GLVideoWidget::initializeGL()
 {
-    qDebug("init gl");
     initializeOpenGLFunctions();
 }
 
@@ -307,8 +300,7 @@ void GLVideoWidget::initializeShader()
     m_program->addShaderFromSourceCode(QGLShader::Fragment, frag);
 
     char const *const *attr = attributes();
-    for (int i = 0; attr[i] && attr[i][0]; ++i) {
-        qDebug("attributes: %s", attr[i]);
+    for (int i = 0; attr[i][0]; ++i) {
         m_program->bindAttributeLocation(attr[i], i);
     }
     if (!m_program->link()) {

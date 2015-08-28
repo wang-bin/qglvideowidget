@@ -5,8 +5,9 @@
 #define YUV_TEST 1
 int main(int argc, char *argv[])
 {
-    QApplication::setAttribute(Qt::AA_UseOpenGLES);
     QApplication a(argc, argv);
+    if (a.arguments().contains("-angle"))
+        QApplication::setAttribute(Qt::AA_UseOpenGLES);
     GLVideoWidget glw;
     if (!a.arguments().contains("-img")) {
         QFile f(":/1280x720.yuv");
