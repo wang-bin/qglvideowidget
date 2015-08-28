@@ -4,7 +4,7 @@
 #include <QtOpenGL>
 #include <QtGui/QImage>
 
-class GLVideoWidget : public QGLWidget, public QOpenGLFunctions
+class GLVideoWidget : public QGLWidget, protected QOpenGLFunctions
 {
     Q_OBJECT
 
@@ -40,6 +40,7 @@ protected:
     virtual void resizeGL(int w, int h);
 private:
     bool update_res;
+    bool upload_tex;
     int width;
     int height;
     //char *pitch[3];

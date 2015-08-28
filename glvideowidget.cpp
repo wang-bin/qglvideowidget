@@ -84,12 +84,13 @@ typedef struct {
 GLVideoWidget::GLVideoWidget(QWidget *parent)
     : QGLWidget(parent)
     , update_res(true)
+    , upload_tex(true)
     , m_program(0)
 {
 //    setAttribute(Qt::WA_OpaquePaintEvent);
   //  setAttribute(Qt::WA_NoSystemBackground);
     //default: swap in qpainter dtor. we should swap before QPainter.endNativePainting()
-    setAutoBufferSwap(false);
+    //setAutoBufferSwap(false);
 
     memset(tex, 0, 3);
 }
@@ -98,6 +99,7 @@ void GLVideoWidget::setFrameData(const QByteArray &data)
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
+    upload_tex = true;
     m_data = data;
     plane[0].data = (char*)m_data.constData();
     if (plane.size() > 1) {
@@ -112,6 +114,7 @@ void GLVideoWidget::setImage(const QImage &img)
 {
     QMutexLocker lock(&m_mutex);
     Q_UNUSED(lock);
+    upload_tex = true;
     m_image = img;
     plane[0].data = (char*)m_image.constBits();
     update();
@@ -122,12 +125,15 @@ void GLVideoWidget::bind()
     for (int i = 0; i < plane.size(); ++i) {
         bindPlane((i + 1) % plane.size());
     }
+    upload_tex = false;
 }
 
 void GLVideoWidget::bindPlane(int p)
 {
     glActiveTexture(GL_TEXTURE0 + p);
     glBindTexture(GL_TEXTURE_2D, tex[p]);
+    if (!upload_tex)
+        return;
     // This is necessary for non-power-of-two textures
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -201,8 +207,8 @@ void GLVideoWidget::setQImageParameters(QImage::Format fmt, int w, int h, int st
     plane.resize(1);
     Plane &p = plane[0];
     p.data = 0;
-    p.stride = stride ? stride : w;
-
+    p.stride = stride ? stride : QImage(w, h, fmt).bytesPerLine();
+qDebug("%s@%d", __FUNCTION__, __LINE__);
     static const gl_fmt_entry_t fmts[] = {
         { QImage::Format_RGB888, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE, 3},
         { QImage::Format_Invalid, 0, 0, 0, 0}
@@ -220,7 +226,6 @@ void GLVideoWidget::setQImageParameters(QImage::Format fmt, int w, int h, int st
             p.upload_size.setWidth(p.stride/p.bpp);
             p.tex_size.setHeight(h);
             p.upload_size.setHeight(h);
-
             return;
         }
     }
@@ -259,7 +264,8 @@ void GLVideoWidget::paintGL()
     for (int i = 0; attr[i]; ++i) {
         m_program->disableAttributeArray(i); //TODO: in setActiveShader
     }
-    swapBuffers();
+    //swapBuffers();
+    //update();
 }
 
 void GLVideoWidget::initializeGL()
