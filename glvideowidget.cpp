@@ -17,15 +17,15 @@ static const QMatrix4x4 yuv2rgb_bt601 =
 
 const GLfloat kVertices[] = {
     -1, 1,
+    -1, -1,
     1, 1,
     1, -1,
-    -1, -1,
 };
 const GLfloat kTexCoords[] = {
     0, 0,
+    0, 1,
     1, 0,
     1, 1,
-    0, 1,
 };
 
 char const *const* attributes()
@@ -60,7 +60,7 @@ typedef struct {
             uniform sampler2D u_Texture0;
             uniform sampler2D u_Texture1;
             uniform sampler2D u_Texture2;
-            varying lowp vec2 v_TexCoords;
+            varying mediump vec2 v_TexCoords;
             uniform mat4 u_colorMatrix;
             void main()
             {
@@ -74,7 +74,7 @@ typedef struct {
             });
      static const char kFragmentShaderRGB[] = glsl(
                  uniform sampler2D u_Texture0;
-                 varying vec2 v_TexCoords;
+                 varying mediump vec2 v_TexCoords;
                  void main() {
                      vec4 c = texture2D(u_Texture0, v_TexCoords);
                      gl_FragColor = c.rgba;
@@ -119,8 +119,8 @@ void GLVideoWidget::setImage(const QImage &img)
 
 void GLVideoWidget::bind()
 {
-    for (int i = 0; i < 3; ++i) {
-        bindPlane((i + 1) % 3);
+    for (int i = 0; i < plane.size(); ++i) {
+        bindPlane((i + 1) % plane.size());
     }
 }
 
@@ -240,7 +240,7 @@ void GLVideoWidget::paintGL()
     }
     bind();
     m_program->bind();
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < plane.size(); ++i) {
         m_program->setUniformValue(u_Texture[i], (GLint)i);
     }
     m_program->setUniformValue(u_colorMatrix, yuv2rgb_bt601);
@@ -254,7 +254,7 @@ void GLVideoWidget::paintGL()
     for (int i = 0; attr[i]; ++i) {
         m_program->enableAttributeArray(i); //TODO: in setActiveShader
     }
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     // d.m_program->release(); //glUseProgram(0)
     for (int i = 0; attr[i]; ++i) {
         m_program->disableAttributeArray(i); //TODO: in setActiveShader
@@ -285,10 +285,20 @@ void GLVideoWidget::initializeShader()
     m_program = new QGLShaderProgram(this);
 
     m_program->addShaderFromSourceCode(QGLShader::Vertex, kVertexShader);
+    QByteArray frag;
     if (plane.size() > 1)
-        m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShader);
+        frag = QByteArray(kFragmentShader);
     else
-        m_program->addShaderFromSourceCode(QGLShader::Fragment, kFragmentShaderRGB);
+        frag = QByteArray(kFragmentShaderRGB);
+    frag.prepend("#ifdef GL_ES\n"
+                 "precision mediump int;\n"
+                 "precision mediump float;\n"
+                 "#else\n"
+                 "#define highp\n"
+                 "#define mediump\n"
+                 "#define lowp\n"
+                 "#endif\n");
+    m_program->addShaderFromSourceCode(QGLShader::Fragment, frag);
 
     char const *const *attr = attributes();
     for (int i = 0; attr[i] && attr[i][0]; ++i) {
@@ -298,12 +308,13 @@ void GLVideoWidget::initializeShader()
     if (!m_program->link()) {
         qWarning("QSGMaterialShader: Shader compilation failed:");
         qWarning() << m_program->log();
+        qDebug("frag: %s", plane.size() > 1 ? kFragmentShader : kFragmentShaderRGB);
     }
 
     u_MVP_matrix = m_program->uniformLocation("u_MVP_matrix");
     // fragment shader
     u_colorMatrix = m_program->uniformLocation("u_colorMatrix");
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < plane.size(); ++i) {
         QString tex_var = QString("u_Texture%1").arg(i);
         u_Texture[i] = m_program->uniformLocation(tex_var);
         qDebug("glGetUniformLocation(\"%s\") = %d", tex_var.toUtf8().constData(), u_Texture[i]);
