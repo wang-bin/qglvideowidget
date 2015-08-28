@@ -7,7 +7,7 @@
 QT       += opengl
 CONFIG -= app_bundle
 
-TARGET = glyuv
+TARGET = glvideowidget
 TEMPLATE = app
 
 
@@ -16,3 +16,6 @@ SOURCES += main.cpp\
 
 HEADERS  += \
     glvideowidget.h
+
+RESOURCES += \
+    img.qrc
