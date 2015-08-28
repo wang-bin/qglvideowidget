@@ -1,6 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file>1280x720.yuv</file>
-        <file>test.jpg</file>
+        <file>test.png</file>
     </qresource>
 </RCC>
